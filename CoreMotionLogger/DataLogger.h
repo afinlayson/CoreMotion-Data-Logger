@@ -33,32 +33,7 @@
  * to strings in a specified format, and ultimately save that data to the app's
  * documents directory with a timestamp.
  */
-@interface DataLogger : NSObject {
-
-    CMMotionManager *_motionManager;
-
-    NSOperationQueue *_deviceMotionQueue;
-    NSOperationQueue *_accelQueue;
-    NSOperationQueue *_gyroQueue;
-
-    NSString *_attitudeString;
-    NSString *_gravityString;
-    NSString *_magneticFieldString;
-    NSString *_rotationRateString;
-    NSString *_userAccelerationString;
-    NSString *_rawGyroscopeString;
-    NSString *_rawAccelerometerString;
-
-
-    bool _logAttitudeData;
-    bool _logGravityData;
-    bool _logMagneticFieldData;
-    bool _logRotationRateData;
-    bool _logUserAccelerationData;
-    bool _logRawGyroscopeData;
-    bool _logRawAccelerometerData;
-
-}
+@interface DataLogger : NSObject
 
 /**
  * startLoggingMotionData
@@ -81,13 +56,15 @@
 - (void) stopLoggingMotionDataAndSave;
 
 // Setters
-- (void) setLogAttitudeData:(bool)newValue;
-- (void) setLogGravityData:(bool)newValue;
-- (void) setLogMagneticFieldData:(bool)newValue;
-- (void) setLogRotationRateData:(bool)newValue;
-- (void) setLogUserAccelerationData:(bool)newValue;
-- (void) setLogRawGyroscopeData:(bool)newValue;
-- (void) setLogRawAccelerometerData:(bool)newValue;
+- (void)setLogAttitudeData:(bool)newValue;
+- (void)setLogGravityData:(bool)newValue;
+- (void)setLogMagneticFieldData:(bool)newValue;
+- (void)setLogRotationRateData:(bool)newValue;
+- (void)setLogUserAccelerationData:(bool)newValue;
+- (void)setLogRawGyroscopeData:(bool)newValue;
+- (void)setLogRawAccelerometerData:(bool)newValue;
++ (BOOL)nameExists:(NSString *)name;
 
-
+@property (nonatomic) NSString *name;
+@property (nonatomic, getter=shouldAppendFile) BOOL appendFile;
 @end

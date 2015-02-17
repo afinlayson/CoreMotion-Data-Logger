@@ -25,86 +25,102 @@
 
 #import "DataLogger.h"
 
-@implementation DataLogger
+static NSString * const kAttitudeFileName = @"Attitude.txt"; // Is this Altitude?
+static NSString * const kGravityFileName = @"Gravity.txt";
+static NSString * const kMagneticFileName = @"Magnetic.txt";
+static NSString * const kRotationFileName = @"Rotation.txt";
+static NSString * const kUserAccelerationFileName = @"UserAcceleration.txt";
+static NSString * const kRawGyroscopeFileName = @"RawGyroscope.txt";
+static NSString * const kRawAccelerationFileName = @"RawAcceleration.txt";
 
-@interface DataLogger (hidden)
-/**
- * processMotion:withError:
- *
- * Appends the new motion data to the appropriate instance variable strings.
- */
-- (void) processMotion:(CMDeviceMotion*)motion withError:(NSError*)error;
+@interface DataLogger ()
+@property (nonatomic) CMMotionManager *motionManager;
+@property (nonatomic) NSOperationQueue *deviceMotionQueue;
+@property (nonatomic) NSOperationQueue *accelQueue;
+@property (nonatomic) NSOperationQueue *gyroQueue;
 
-/**
- * processAccel:withError:
- *
- * Appends the new raw accleration data to the appropriate instance variable string.
- */
-- (void) processAccel:(CMAccelerometerData*)accelData withError:(NSError*)error;
+@property (nonatomic) BOOL logAttitudeData;
+@property (nonatomic) BOOL logGravityData;
+@property (nonatomic) BOOL logMagneticFieldData;
+@property (nonatomic) BOOL logRotationRateData;
+@property (nonatomic) BOOL logUserAccelerationData;
+@property (nonatomic) BOOL logRawGyroscopeData;
+@property (nonatomic) BOOL logRawAccelerometerData;
 
-/**
- * processGyro:withError:
- *
- * Appends the new raw gyro data to the appropriate instance variable string.
- */
-- (void) processGyro:(CMGyroData*)gyroData withError:(NSError*)error;
+@property (nonatomic) NSString *folderPath;
 
-/**
- * writeDataToDisk
- *
- * Using the boolean instance variables to know which strings to write, this method saves
- * the data strings to the app's documents directory. The filename of each string contains
- * a date and time string so that a user can save multiple log runs. The time format needs
- * to be long so that a user can log two different runs that start in the same minute.
- */
-- (void) writeDataToDisk;
+@property (nonatomic) NSFileHandle *handleAttitudeData;
+@property (nonatomic) NSFileHandle *handleGravityData;
+@property (nonatomic) NSFileHandle *handleMagneticFieldData;
+@property (nonatomic) NSFileHandle *handleRotationRateData;
+@property (nonatomic) NSFileHandle *handleUserAccelerationData;
+@property (nonatomic) NSFileHandle *handleRawGyroscopeData;
+@property (nonatomic) NSFileHandle *handleRawAccelerometerData;
 @end
 
-- (id)init {
+@implementation DataLogger
 
+- (instancetype)init
+{
     self = [super init];
     if (self) {
 
-        _motionManager = [[CMMotionManager alloc] init];
-        _motionManager.deviceMotionUpdateInterval = 0.01; //100 Hz
-        _motionManager.accelerometerUpdateInterval = 0.01;
-        _motionManager.gyroUpdateInterval = 0.01;
+        self.motionManager = [[CMMotionManager alloc] init];
+        self.motionManager.deviceMotionUpdateInterval = 0.01; //100 Hz
+        self.motionManager.accelerometerUpdateInterval = 0.01;
+        self.motionManager.gyroUpdateInterval = 0.01;
 
         // Limiting the concurrent ops to 1 is a cheap way to avoid two handlers editing the same
         // string at the same time.
-        _deviceMotionQueue = [[NSOperationQueue alloc] init];
-        [_deviceMotionQueue setMaxConcurrentOperationCount:1];
+        
+        self.deviceMotionQueue = [[NSOperationQueue alloc] init];
+        [self.deviceMotionQueue setMaxConcurrentOperationCount:1];
 
-        _accelQueue = [[NSOperationQueue alloc] init];
-        [_accelQueue setMaxConcurrentOperationCount:1];
+        self.accelQueue = [[NSOperationQueue alloc] init];
+        [self.accelQueue setMaxConcurrentOperationCount:1];
 
-        _gyroQueue = [[NSOperationQueue alloc] init];
-        [_gyroQueue setMaxConcurrentOperationCount:1];
+        self.gyroQueue = [[NSOperationQueue alloc] init];
+        [self.gyroQueue setMaxConcurrentOperationCount:1];
 
-        _logAttitudeData = false;
-        _logGravityData = false;
-        _logMagneticFieldData = false;
-        _logRotationRateData = false;
-        _logUserAccelerationData = false;
-        _logRawGyroscopeData = false;
-        _logRawAccelerometerData = false;
-
-        _attitudeString = [[NSString alloc] init];
-        _gravityString = [[NSString alloc] init];
-        _magneticFieldString = [[NSString alloc] init];
-        _rotationRateString = [[NSString alloc] init];
-        _userAccelerationString = [[NSString alloc] init];
-        _rawGyroscopeString = [[NSString alloc] init];
-        _rawAccelerometerString = [[NSString alloc] init];
-
+        self.logAttitudeData = false;
+        self.logGravityData = false;
+        self.logMagneticFieldData = false;
+        self.logRotationRateData = false;
+        self.logUserAccelerationData = false;
+        self.logRawGyroscopeData = false;
+        self.logRawAccelerometerData = false;
     }
 
     return self;
 }
 
-- (void) startLoggingMotionData {
++ (NSString *) applicationDocumentsDirectory
+{
+    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
+    NSString *basePath = ([paths count] > 0) ? [paths objectAtIndex:0] : nil;
+    return basePath;
+}
+
+
+- (void) startLoggingMotionData
+{
 
     NSLog(@"Starting to log motion data.");
+    
+    if (!self.folderPath) {
+        NSDateFormatter *dateFormatter = [[NSDateFormatter alloc] init];
+        [dateFormatter setTimeStyle:NSDateFormatterLongStyle];
+        [dateFormatter setDateStyle:NSDateFormatterShortStyle];
+        
+        // Some filesystems hate colons
+        NSString *dateString = [[dateFormatter stringFromDate:[NSDate date]] stringByReplacingOccurrencesOfString:@":" withString:@"self."];
+        // I hate spaces
+        dateString = [dateString stringByReplacingOccurrencesOfString:@" " withString:@"self."];
+        // Nobody can stand forward slashes
+        dateString = [dateString stringByReplacingOccurrencesOfString:@"/" withString:@"self."];
+        
+        self.folderPath = [[DataLogger applicationDocumentsDirectory] stringByAppendingPathComponent:dateString];
+    }
 
     CMDeviceMotionHandler motionHandler = ^(CMDeviceMotion *motion, NSError *error) {
         [self processMotion:motion withError:error];
@@ -119,230 +135,195 @@
     };
 
 
-    if (_logAttitudeData || _logGravityData || _logMagneticFieldData || _logRotationRateData || _logUserAccelerationData ) {
-        [_motionManager startDeviceMotionUpdatesToQueue:_deviceMotionQueue withHandler:motionHandler];
+    if (self.logAttitudeData || self.logGravityData || self.logMagneticFieldData || self.logRotationRateData || self.logUserAccelerationData ) {
+        [self.motionManager startDeviceMotionUpdatesToQueue:self.deviceMotionQueue withHandler:motionHandler];
     }
 
-    if (_logRawGyroscopeData) {
-        [_motionManager startGyroUpdatesToQueue:_gyroQueue withHandler:gyroHandler];
+    if (self.logRawGyroscopeData) {
+        [self.motionManager startGyroUpdatesToQueue:self.gyroQueue withHandler:gyroHandler];
     }
 
-    if (_logRawAccelerometerData) {
-        [_motionManager startAccelerometerUpdatesToQueue:_accelQueue withHandler:accelHandler];
+    if (self.logRawAccelerometerData) {
+        [self.motionManager startAccelerometerUpdatesToQueue:self.accelQueue withHandler:accelHandler];
     }
-
+    
+    [self openFileHandles];
 }
 
-- (void) stopLoggingMotionDataAndSave {
+- (void)openFileHandles
+{
+    BOOL shouldAppendFile = self.shouldAppendFile;
+    NSFileHandle *(^createFileHandler)(NSString *fileName) = ^NSFileHandle *(NSString *fileName){
+        if ([[NSFileManager defaultManager] fileExistsAtPath:fileName]) {
+            NSError *error;
+            if (!shouldAppendFile) {
+                [[NSFileManager defaultManager] removeItemAtPath:fileName error:&error];
+                if (error) {
+                    NSLog(@"Error found removing file %@: %@", fileName, error);
+                }
+            }
+        } else {
+            [[NSFileManager defaultManager] createFileAtPath:fileName contents:[NSData data] attributes:nil];
+        }
+        return [NSFileHandle fileHandleForWritingAtPath:fileName];
+    };
+    
+    BOOL isfolder = NO;
+    NSError *error;
+    if ([[NSFileManager defaultManager] fileExistsAtPath:self.folderPath isDirectory:&isfolder]) {
+        if (!isfolder) {
+            [[NSFileManager defaultManager] removeItemAtPath:self.folderPath error:&error];
+            if (error) {
+                NSLog(@"There was an error trying to remove this file: %@" ,self.folderPath);
+                NSLog(@"%@",error);
+            }
+        }
+    } else {
+        [[NSFileManager defaultManager] createDirectoryAtPath:self.folderPath withIntermediateDirectories:NO attributes:nil error:&error];
+        if (error) {
+            NSLog(@"There was an error trying to create this folder: %@" ,self.folderPath);
+            NSLog(@"%@",error);
+        }
+    }
+    
+    if (self.logAttitudeData) {
+        self.handleAttitudeData = createFileHandler([self.folderPath stringByAppendingPathComponent:kAttitudeFileName]);
+    }
+    if (self.logGravityData) {
+        
+        self.handleGravityData = createFileHandler([self.folderPath stringByAppendingPathComponent:kGravityFileName]);
+    }
+    if (self.logMagneticFieldData) {
+        self.handleMagneticFieldData = createFileHandler([self.folderPath stringByAppendingPathComponent:kMagneticFileName]);
+    }
+    if (self.logRawAccelerometerData) {
+        self.handleRawAccelerometerData = createFileHandler([self.folderPath stringByAppendingPathComponent:kRawAccelerationFileName]);
+    }
+    if (self.logRawGyroscopeData) {
+        self.handleRawGyroscopeData = createFileHandler([self.folderPath stringByAppendingPathComponent:kRawGyroscopeFileName]);
+    }
+    if (self.logRotationRateData) {
+        self.handleRotationRateData = createFileHandler([self.folderPath stringByAppendingPathComponent:kUserAccelerationFileName]);
+    }
+    if (self.logRotationRateData) {
+        self.handleUserAccelerationData = createFileHandler([self.folderPath stringByAppendingPathComponent:kUserAccelerationFileName]);
+    }
+}
+
+- (void)finishWriting
+{
+    [self.handleAttitudeData closeFile];
+    [self.handleGravityData closeFile];
+    [self.handleMagneticFieldData closeFile];
+    [self.handleRawAccelerometerData closeFile];
+    [self.handleRawGyroscopeData closeFile];
+    [self.handleRotationRateData closeFile];
+    [self.handleUserAccelerationData closeFile];
+}
+
+- (void)stopLoggingMotionDataAndSave {
 
     NSLog(@"Stopping data logging.");
 
-    [_motionManager stopDeviceMotionUpdates];
-    [_deviceMotionQueue waitUntilAllOperationsAreFinished];
+    [self.motionManager stopDeviceMotionUpdates];
+    [self.deviceMotionQueue waitUntilAllOperationsAreFinished];
 
-    [_motionManager stopAccelerometerUpdates];
-    [_accelQueue waitUntilAllOperationsAreFinished];
+    [self.motionManager stopAccelerometerUpdates];
+    [self.accelQueue waitUntilAllOperationsAreFinished];
 
-    [_motionManager stopGyroUpdates];
-    [_gyroQueue waitUntilAllOperationsAreFinished];
+    [self.motionManager stopGyroUpdates];
+    [self.gyroQueue waitUntilAllOperationsAreFinished];
 
     // Save all of the data!
-    [self writeDataToDisk];
-
+    [self finishWriting];
 }
 
-- (void) processAccel:(CMAccelerometerData*)accelData withError:(NSError*)error {
+- (void)processAccel:(CMAccelerometerData*)accelData withError:(NSError*)error {
 
-    if (_logRawAccelerometerData) {
-        _rawAccelerometerString = [_rawAccelerometerString stringByAppendingFormat:@"%f,%f,%f,%f\n", accelData.timestamp,
+    if (self.logRawAccelerometerData) {
+        NSString *rawAccelerometerString = [NSString stringWithFormat:@"%f,%f,%f,%f\n", accelData.timestamp,
                                                            accelData.acceleration.x,
                                                            accelData.acceleration.y,
                                                            accelData.acceleration.z,
                                                            nil];
+        
+        [self.handleRawAccelerometerData writeData:[rawAccelerometerString dataUsingEncoding:NSUTF8StringEncoding]];
     }
 }
 
-- (void) processGyro:(CMGyroData*)gyroData withError:(NSError*)error {
-
-    if (_logRawGyroscopeData) {
-        _rawGyroscopeString = [_rawGyroscopeString stringByAppendingFormat:@"%f,%f,%f,%f\n", gyroData.timestamp,
+- (void)processGyro:(CMGyroData*)gyroData withError:(NSError*)error
+{
+    if (self.logRawGyroscopeData) {
+        NSString *rawGyroscopeString = [NSString stringWithFormat:@"%f,%f,%f,%f\n", gyroData.timestamp,
                                                    gyroData.rotationRate.x,
                                                    gyroData.rotationRate.y,
                                                    gyroData.rotationRate.z,
                                                    nil];
+        [self.handleRawGyroscopeData writeData:[rawGyroscopeString dataUsingEncoding:NSUTF8StringEncoding]];
     }
 }
 
-- (void) processMotion:(CMDeviceMotion*)motion withError:(NSError*)error {
-
-    //    NSLog(@"Processing motion with motion pointer %p",motion);
-    //    NSLog(@"Curr accel string %@",_userAccelerationString);
-
-    if (_logAttitudeData) {
-        _attitudeString = [_attitudeString stringByAppendingFormat:@"%f,%f,%f,%f\n", motion.timestamp,
+- (void) processMotion:(CMDeviceMotion*)motion withError:(NSError*)error
+{
+    if (self.logAttitudeData) {
+        NSString *attitudeString = [NSString stringWithFormat:@"%f,%f,%f,%f\n", motion.timestamp,
                                            motion.attitude.roll,
                                            motion.attitude.pitch,
                                            motion.attitude.yaw,
                                            nil];
+        [self.handleAttitudeData writeData:[attitudeString dataUsingEncoding:NSUTF8StringEncoding]];
     }
 
-    if (_logGravityData) {
-        _gravityString = [_gravityString stringByAppendingFormat:@"%f,%f,%f,%f\n", motion.timestamp,
+    if (self.logGravityData) {
+        NSString *gravityString = [NSString stringWithFormat:@"%f,%f,%f,%f\n", motion.timestamp,
                                          motion.gravity.x,
                                          motion.gravity.y,
                                          motion.gravity.z,
                                          nil];
+        [self.handleGravityData writeData:[gravityString dataUsingEncoding:NSUTF8StringEncoding]];
     }
 
-    if (_logMagneticFieldData) {
-        _magneticFieldString = [_magneticFieldString stringByAppendingFormat:@"%f,%f,%f,%f,%d\n", motion.timestamp,
+    if (self.logMagneticFieldData) {
+        NSString *magneticFieldString = [NSString stringWithFormat:@"%f,%f,%f,%f,%d\n", motion.timestamp,
                                                      motion.magneticField.field.x,
                                                      motion.magneticField.field.y,
                                                      motion.magneticField.field.z,
                                                      (int)motion.magneticField.accuracy,
                                                      nil];
+        [self.handleMagneticFieldData writeData:[magneticFieldString dataUsingEncoding:NSUTF8StringEncoding]];
     }
 
-    if (_logRotationRateData) {
-        _rotationRateString = [_rotationRateString stringByAppendingFormat:@"%f,%f,%f,%f\n", motion.timestamp,
+    if (self.logRotationRateData) {
+        NSString *rotationRateString = [NSString stringWithFormat:@"%f,%f,%f,%f\n", motion.timestamp,
                                                    motion.rotationRate.x,
                                                    motion.rotationRate.y,
                                                    motion.rotationRate.z,
                                                    nil];
+        
+        [self.handleRotationRateData writeData:[rotationRateString dataUsingEncoding:NSUTF8StringEncoding]];
     }
 
-    if (_logUserAccelerationData) {
-        _userAccelerationString = [_userAccelerationString stringByAppendingFormat:@"%f,%f,%f,%f\n", motion.timestamp,
+    if (self.logUserAccelerationData) {
+        NSString *userAccelerationString = [NSString stringWithFormat:@"%f,%f,%f,%f\n", motion.timestamp,
                                                            motion.userAcceleration.x,
                                                            motion.userAcceleration.y,
                                                            motion.userAcceleration.z,
                                                            nil];
+        [self.handleUserAccelerationData writeData:[userAccelerationString dataUsingEncoding:NSUTF8StringEncoding]];
     }
-
 }
 
-
-
-- (void) setLogAttitudeData:(bool)newValue {
-    _logAttitudeData = newValue;
++ (BOOL)nameExists:(NSString *)name
+{
+    return [[NSFileManager defaultManager] fileExistsAtPath:[[self applicationDocumentsDirectory] stringByAppendingPathComponent:name]];
 }
 
-- (void) setLogGravityData:(bool)newValue {
-    _logGravityData = newValue;
-}
-
-- (void) setLogMagneticFieldData:(bool)newValue {
-    _logMagneticFieldData = newValue;
-}
-
-- (void) setLogRotationRateData:(bool)newValue {
-    _logRotationRateData = newValue;
-}
-
-- (void) setLogUserAccelerationData:(bool)newValue {
-    _logUserAccelerationData = newValue;
-}
-
-- (void) setLogRawGyroscopeData:(bool)newValue {
-    _logRawGyroscopeData = newValue;
-}
-
-- (void) setLogRawAccelerometerData:(bool)newValue {
-    _logRawAccelerometerData = newValue;
-}
-
-
-- (void) writeDataToDisk {
-    NSLog(@"Saving everything to disk!");
-
-    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
-    NSString *documentsDirectory = [paths objectAtIndex:0];
-
-    NSDateFormatter *dateFormatter = [[NSDateFormatter alloc] init];
-    [dateFormatter setTimeStyle:NSDateFormatterLongStyle];
-    [dateFormatter setDateStyle:NSDateFormatterShortStyle];
-
-    // Some filesystems hate colons
-    NSString *dateString = [[dateFormatter stringFromDate:[NSDate date]] stringByReplacingOccurrencesOfString:@":" withString:@"_"];
-    // I hate spaces
-    dateString = [dateString stringByReplacingOccurrencesOfString:@" " withString:@"_"];
-    // Nobody can stand forward slashes
-    dateString = [dateString stringByReplacingOccurrencesOfString:@"/" withString:@"_"];
-
-
-    if (_logAttitudeData) {
-        NSString *fullPath = [documentsDirectory stringByAppendingPathComponent:[NSString stringWithFormat:@"attitude_%@.txt", dateString, nil]];
-
-        [_attitudeString writeToFile:fullPath
-                          atomically:NO
-                            encoding:NSStringEncodingConversionAllowLossy
-                               error:nil];
-        _attitudeString = @"";
+- (void)setName:(NSString *)name
+{
+    _name = name;
+    if (name.length) {
+        self.folderPath = [[DataLogger applicationDocumentsDirectory] stringByAppendingPathComponent:name];
     }
-
-    if (_logGravityData) {
-        NSString *fullPath = [documentsDirectory stringByAppendingPathComponent:[NSString stringWithFormat:@"gravity_%@.txt", dateString, nil]];
-
-        [_gravityString writeToFile:fullPath
-                         atomically:NO
-                           encoding:NSStringEncodingConversionAllowLossy
-                              error:nil];
-        _gravityString = @"";
-    }
-
-    if (_logMagneticFieldData) {
-        NSString *fullPath = [documentsDirectory stringByAppendingPathComponent:[NSString stringWithFormat:@"magneticField_%@.txt", dateString, nil]];
-
-        [_magneticFieldString writeToFile:fullPath
-                               atomically:NO
-                                 encoding:NSStringEncodingConversionAllowLossy
-                                    error:nil];
-        _magneticFieldString = @"";
-    }
-
-    if (_logRotationRateData) {
-        NSString *fullPath = [documentsDirectory stringByAppendingPathComponent:[NSString stringWithFormat:@"rotationRate_%@.txt", dateString, nil]];
-
-        [_rotationRateString writeToFile:fullPath
-                              atomically:NO
-                                encoding:NSStringEncodingConversionAllowLossy
-                                   error:nil];
-        _rotationRateString = @"";
-    }
-
-    if (_logUserAccelerationData) {
-        NSString *fullPath = [documentsDirectory stringByAppendingPathComponent:[NSString stringWithFormat:@"userAcceleration_%@.txt", dateString, nil]];
-
-        [_userAccelerationString writeToFile:fullPath
-                                  atomically:NO
-                                    encoding:NSStringEncodingConversionAllowLossy
-                                       error:nil];
-        _userAccelerationString = @"";
-    }
-
-    if (_logRawGyroscopeData) {
-        NSString *fullPath = [documentsDirectory stringByAppendingPathComponent:[NSString stringWithFormat:@"rawGyroscope_%@.txt", dateString, nil]];
-
-        [_rawGyroscopeString writeToFile:fullPath
-                              atomically:NO
-                                encoding:NSStringEncodingConversionAllowLossy
-                                   error:nil];
-        _rawGyroscopeString = @"";
-    }
-
-    if (_logRawAccelerometerData) {
-        NSString *fullPath = [documentsDirectory stringByAppendingPathComponent:[NSString stringWithFormat:@"rawAccelerometer_%@.txt", dateString, nil]];
-
-        [_rawAccelerometerString writeToFile:fullPath
-                                  atomically:NO
-                                    encoding:NSStringEncodingConversionAllowLossy
-                                       error:nil];
-        _rawAccelerometerString = @"";
-    }
-
-
 }
-
-
 
 @end
